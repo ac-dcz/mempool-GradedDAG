@@ -69,6 +69,8 @@ func (q *txQueue) make() {
 		batch.Txs = append(batch.Txs, q.queue[q.rind])
 		q.nums--
 	}
+	//test set
+	batch.Txs = nil
 	q.batchChannel <- batch
 }
 

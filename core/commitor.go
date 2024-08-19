@@ -180,7 +180,7 @@ func (c *Commitor) run() {
 			if block, err := getBlock(c.store, digest); err != nil {
 				logger.Warn.Println(err)
 			} else {
-				if block.Batch.Txs != nil {
+				if block.Batch.ID != -1 {
 					//BenchMark Log
 					logger.Info.Printf("commit Block round %d node %d batch_id %d \n", block.Round, block.Author, block.Batch.ID)
 				}

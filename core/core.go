@@ -159,7 +159,7 @@ func (corer *Core) generatorBlock(round int) *Block {
 
 	if block != nil {
 		corer.proposedFlag[round] = struct{}{}
-		if block.Batch.Txs != nil {
+		if block.Batch.ID != -1 {
 			//BenchMark Log
 			logger.Info.Printf("create Block round %d node %d batch_id %d \n", block.Round, block.Author, block.Batch.ID)
 		}
