@@ -46,8 +46,8 @@ func GetMessage(Typ int, sigService *crypto.SigService) core.ConsensusMessage {
 		msg, _ = core.NewEchoMsg(-1, -1, GetDigest(), -1, sigService)
 	case core.ReadyType:
 		msg, _ = core.NewReadyMsg(-1, -1, GetDigest(), -1, sigService)
-	case core.PBCProposeType:
-		msg, _ = core.NewPBCProposeMsg(-1, -1, GetBlock(10), sigService)
+	case core.CBCProposeType:
+		msg, _ = core.NewCBCProposeMsg(-1, -1, GetBlock(10), sigService)
 	case core.ReplyBlockType:
 		msg, _ = core.NewReplyBlockMsg(-1, []*core.Block{GetBlock(10)}, -1, sigService)
 	case core.RequestBlockType:
@@ -72,8 +72,8 @@ func DisplayMessage(msg core.ConsensusMessage, t *testing.T) {
 	case core.ReadyType:
 		temp := msg.(*core.ReadyMsg)
 		t.Logf("%v \n", temp)
-	case core.PBCProposeType:
-		temp := msg.(*core.PBCProposeMsg)
+	case core.CBCProposeType:
+		temp := msg.(*core.CBCProposeMsg)
 		t.Logf("%v \n", temp)
 	case core.ElectType:
 		temp := msg.(*core.ElectMsg)

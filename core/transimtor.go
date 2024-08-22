@@ -55,7 +55,7 @@ func (tr *Transmitor) Send(from, to NodeID, msg ConsensusMessage) error {
 	}
 
 	// filter
-	if tr.parameters.DDos && (msg.MsgType() == GRBCProposeType || msg.MsgType() == PBCProposeType) {
+	if tr.parameters.DDos && (msg.MsgType() == GRBCProposeType || msg.MsgType() == CBCProposeType) {
 		time.AfterFunc(time.Millisecond*time.Duration(tr.parameters.NetwrokDelay), func() {
 			tr.msgCh <- &network.NetMessage{
 				Msg:     msg,

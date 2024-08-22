@@ -194,22 +194,22 @@ func (msg *ReadyMsg) MsgType() int {
 	return ReadyType
 }
 
-// PBCProposeMsg
-type PBCProposeMsg struct {
+// CBCProposeMsg
+type CBCProposeMsg struct {
 	Author    NodeID
 	Round     int
 	B         *Block
 	Signature crypto.Signature
 }
 
-func NewPBCProposeMsg(
+func NewCBCProposeMsg(
 	Author NodeID,
 	Round int,
 	B *Block,
 	sigService *crypto.SigService,
-) (*PBCProposeMsg, error) {
+) (*CBCProposeMsg, error) {
 
-	msg := &PBCProposeMsg{
+	msg := &CBCProposeMsg{
 		Author: Author,
 		Round:  Round,
 		B:      B,
@@ -223,11 +223,11 @@ func NewPBCProposeMsg(
 	}
 }
 
-func (msg *PBCProposeMsg) Verify(committee Committee) bool {
+func (msg *CBCProposeMsg) Verify(committee Committee) bool {
 	return msg.Signature.Verify(committee.Name(msg.Author), msg.Hash())
 }
 
-func (msg *PBCProposeMsg) Hash() crypto.Digest {
+func (msg *CBCProposeMsg) Hash() crypto.Digest {
 
 	hasher := crypto.NewHasher()
 	hasher.Add(strconv.AppendInt(nil, int64(msg.Author), 2))
@@ -237,8 +237,45 @@ func (msg *PBCProposeMsg) Hash() crypto.Digest {
 	return hasher.Sum256(nil)
 }
 
-func (msg *PBCProposeMsg) MsgType() int {
-	return PBCProposeType
+func (msg *CBCProposeMsg) MsgType() int {
+	return CBCProposeType
+}
+
+type CBCVoteMsg struct {
+	Author    NodeID
+	Proposer  NodeID
+	BlockHash crypto.Digest
+	Round     int
+	Signature crypto.Signature
+}
+
+func NewCBCVoteMsg(Author NodeID, B *Block, sigService *crypto.SigService) (*CBCVoteMsg, error) {
+	vote := &CBCVoteMsg{
+		Author:    Author,
+		Proposer:  B.Author,
+		BlockHash: B.Hash(),
+		Round:     B.Round,
+	}
+	vote.Signature, _ = sigService.RequestSignature(vote.Hash())
+	return vote, nil
+}
+
+func (v *CBCVoteMsg) Verify(committee Committee) bool {
+	pub := committee.Name(v.Author)
+	return v.Signature.Verify(pub, v.Hash())
+}
+
+func (v *CBCVoteMsg) Hash() crypto.Digest {
+	hasher := crypto.NewHasher()
+	hasher.Add(strconv.AppendInt(nil, int64(v.Author), 2))
+	hasher.Add(strconv.AppendInt(nil, int64(v.Proposer), 2))
+	hasher.Add(strconv.AppendInt(nil, int64(v.Round), 2))
+	hasher.Add(v.BlockHash[:])
+	return hasher.Sum256(nil)
+}
+
+func (v *CBCVoteMsg) MsgType() int {
+	return CBCVoteType
 }
 
 // ElectMsg
@@ -379,7 +416,8 @@ const (
 	EchoType
 	ReadyType
 	ElectType
-	PBCProposeType
+	CBCProposeType
+	CBCVoteType
 	RequestBlockType
 	ReplyBlockType
 	LoopBackType
@@ -391,7 +429,8 @@ var DefaultMsgTypes = map[int]reflect.Type{
 	EchoType:         reflect.TypeOf(EchoMsg{}),
 	ReadyType:        reflect.TypeOf(ReadyMsg{}),
 	ElectType:        reflect.TypeOf(ElectMsg{}),
-	PBCProposeType:   reflect.TypeOf(PBCProposeMsg{}),
+	CBCProposeType:   reflect.TypeOf(CBCProposeMsg{}),
+	CBCVoteType:      reflect.TypeOf(CBCVoteMsg{}),
 	RequestBlockType: reflect.TypeOf(RequestBlockMsg{}),
 	ReplyBlockType:   reflect.TypeOf(ReplyBlockMsg{}),
 	LoopBackType:     reflect.TypeOf(LoopBackMsg{}),

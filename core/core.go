@@ -29,11 +29,13 @@ type Core struct {
 	commitor            *Commitor
 	localDAG            *LocalDAG
 	loopBackChannel     chan *Block
-	grbcCallBackChannel chan *callBackReq
+	grbcCallBackChannel chan *grbcCallBackReq
+	cbcCallBackChannel  chan *cbcCallBackReq
 	commitChannel       chan<- *Block
 	proposedNotify      map[int]*sync.Mutex
 	proposedFlag        map[int]struct{}
 	grbcInstances       map[int]map[NodeID]*GRBC
+	cbcInstances        map[int]map[NodeID]*CBC
 }
 
 func NewCore(
@@ -48,7 +50,7 @@ func NewCore(
 ) *Core {
 
 	loopBackChannel := make(chan *Block, 1_000)
-	grbcCallBackChannel := make(chan *callBackReq, 1_000)
+	grbcCallBackChannel := make(chan *grbcCallBackReq, 1_000)
 	corer := &Core{
 		nodeID:              nodeID,
 		committee:           committee,
@@ -65,6 +67,8 @@ func NewCore(
 		grbcInstances:       make(map[int]map[NodeID]*GRBC),
 		localDAG:            NewLocalDAG(),
 		proposedFlag:        make(map[int]struct{}),
+		cbcInstances:        make(map[int]map[NodeID]*CBC),
+		cbcCallBackChannel:  make(chan *cbcCallBackReq, 100),
 	}
 
 	corer.retriever = NewRetriever(nodeID, store, transmitor, sigService, parameters, loopBackChannel)
@@ -106,6 +110,20 @@ func (corer *Core) getGRBCInstance(node NodeID, round int) *GRBC {
 	}
 	corer.grbcInstances[round] = instances
 	return instances[node]
+}
+
+func (corer *Core) getCBCInstance(node NodeID, round int) *CBC {
+	instances, ok := corer.cbcInstances[round]
+	if !ok {
+		instances = map[NodeID]*CBC{}
+		corer.cbcInstances[round] = instances
+	}
+	instance, ok := instances[node]
+	if !ok {
+		instance = NewCBC(corer, node, round, corer.cbcCallBackChannel)
+		instances[node] = instance
+	}
+	return instance
 }
 
 func (corer *Core) checkReference(block *Block) (bool, []crypto.Digest) {
@@ -176,6 +194,11 @@ func (corer *Core) handleGRBCPropose(propose *GRBCProposeMsg) error {
 		return ErrSignature(propose.MsgType(), propose.Round, int(propose.Author))
 	}
 
+	//如果已经收到了2f+1个grade2的grbc，就停止投票
+	if _, g2 := corer.localDAG.GetRoundReceivedBlockNums(propose.Round); g2 >= corer.committee.HightThreshold() {
+		return nil
+	}
+
 	//Step 2: store Block
 	if err := storeBlock(corer.store, propose.B); err != nil {
 		return err
@@ -224,8 +247,8 @@ func (corer *Core) handleReady(ready *ReadyMsg) error {
 	return nil
 }
 
-func (corer *Core) handlePBCPropose(propose *PBCProposeMsg) error {
-	logger.Debug.Printf("procesing pbc propose round %d node %d \n", propose.Round, propose.Author)
+func (corer *Core) handleCBCPropose(propose *CBCProposeMsg) error {
+	logger.Debug.Printf("procesing cbc propose round %d node %d \n", propose.Round, propose.Author)
 
 	//Step 1: verify signature
 	if !propose.Verify(corer.committee) {
@@ -241,14 +264,25 @@ func (corer *Core) handlePBCPropose(propose *PBCProposeMsg) error {
 	if ok, miss := corer.checkReference(propose.B); !ok {
 		//retrieve miss block
 		corer.retriever.requestBlocks(miss, propose.Author, propose.B.Hash())
-
-		if (propose.Round-1)%WaveRound != 0 { //如果前一轮是一个PB Round，必须等收到区块后开始投票
-			return ErrReference(propose.MsgType(), propose.Round, int(propose.Author))
-		}
+		// if (propose.Round-1)%WaveRound != 0 { //如果前一轮是一个PB Round，必须等收到区块后开始投票
+		// 	return ErrReference(propose.MsgType(), propose.Round, int(propose.Author))
+		// }
 	}
 
 	//Step 4
-	corer.handleOutPut(propose.B.Round, propose.B.Author, propose.B.Hash(), propose.B.Reference)
+	go corer.getCBCInstance(propose.Author, propose.Round).ProcessProposal(propose)
+
+	return nil
+}
+
+func (corer *Core) handleCBCVote(vote *CBCVoteMsg) error {
+	logger.Debug.Printf("procesing cbc vote proposer %d round %d author %d \n", vote.Proposer, vote.Round, vote.Author)
+	//Step 1: verify signature
+	if !vote.Verify(corer.committee) {
+		return ErrSignature(vote.MsgType(), vote.Round, int(vote.Author))
+	}
+
+	go corer.getCBCInstance(vote.Proposer, vote.Round).ProcessVote(vote)
 
 	return nil
 }
@@ -261,22 +295,23 @@ func (corer *Core) handleOutPut(round int, node NodeID, digest crypto.Digest, re
 	if n, grade2nums := corer.localDAG.GetRoundReceivedBlockNums(round); n >= corer.committee.HightThreshold() {
 		if round%WaveRound == 0 {
 			if grade2nums >= corer.committee.HightThreshold() {
-				if _, ok := corer.proposedNotify[round+1]; !ok {
-					corer.proposedNotify[round+1] = &sync.Mutex{} // first
-					//timeout
-					time.AfterFunc(time.Millisecond*time.Duration(corer.parameters.NetwrokDelay), func() {
-						mu := corer.proposedNotify[round+1]
-						if mu.TryLock() {
-							corer.advanceRound(round + 1)
-						}
-					})
-				}
-				if grade2nums == corer.committee.Size() {
-					mu := corer.proposedNotify[round+1] // second
-					if mu.TryLock() {
-						corer.advanceRound(round + 1)
-					}
-				}
+				corer.advanceRound(round + 1)
+				// if _, ok := corer.proposedNotify[round+1]; !ok {
+				// 	corer.proposedNotify[round+1] = &sync.Mutex{} // first
+				// 	//timeout
+				// 	time.AfterFunc(time.Millisecond*time.Duration(corer.parameters.NetwrokDelay), func() {
+				// 		mu := corer.proposedNotify[round+1]
+				// 		if mu.TryLock() {
+				// 			corer.advanceRound(round + 1)
+				// 		}
+				// 	})
+				// }
+				// if grade2nums == corer.committee.Size() {
+				// 	mu := corer.proposedNotify[round+1] // second
+				// 	if mu.TryLock() {
+				// 		corer.advanceRound(round + 1)
+				// 	}
+				// }
 			}
 
 		} else {
@@ -301,7 +336,7 @@ func (corer *Core) advanceRound(round int) error {
 				corer.transmitor.RecvChannel() <- propose
 			}
 		} else {
-			if propose, err := NewPBCProposeMsg(corer.nodeID, round, block, corer.sigService); err != nil {
+			if propose, err := NewCBCProposeMsg(corer.nodeID, round, block, corer.sigService); err != nil {
 				return err
 			} else {
 				corer.transmitor.Send(corer.nodeID, NONE, propose)
@@ -401,8 +436,8 @@ func (corer *Core) handleLoopBack(block *Block) error {
 	return nil
 }
 
-func (corer *Core) handleCallBack(req *callBackReq) error {
-	logger.Debug.Printf("procesing block call back round %d node %d \n", req.round, req.nodeID)
+func (corer *Core) handleGRBCCallBack(req *grbcCallBackReq) error {
+	logger.Debug.Printf("procesing grbc block call back round %d node %d \n", req.round, req.nodeID)
 
 	//Update grade
 	corer.localDAG.UpdateGrade(req.round, int(req.nodeID), req.grade)
@@ -415,6 +450,11 @@ func (corer *Core) handleCallBack(req *callBackReq) error {
 	}
 
 	return nil
+}
+
+func (corer *Core) handleCBCCallBack(req *cbcCallBackReq) error {
+	logger.Debug.Printf("procesing cbc block call back round %d node %d \n", req.Round, req.Proposer)
+	return corer.handleOutPut(req.Round, req.Proposer, req.BlockHash, req.Reference)
 }
 
 func (corer *Core) Run() {
@@ -442,8 +482,10 @@ func (corer *Core) Run() {
 						err = corer.handleEcho(msg.(*EchoMsg))
 					case ReadyType:
 						err = corer.handleReady(msg.(*ReadyMsg))
-					case PBCProposeType:
-						err = corer.handlePBCPropose(msg.(*PBCProposeMsg))
+					case CBCProposeType:
+						err = corer.handleCBCPropose(msg.(*CBCProposeMsg))
+					case CBCVoteType:
+						err = corer.handleCBCVote(msg.(*CBCVoteMsg))
 					case ElectType:
 						err = corer.handleElect(msg.(*ElectMsg))
 					case RequestBlockType:
@@ -459,7 +501,11 @@ func (corer *Core) Run() {
 				}
 			case cbReq := <-corer.grbcCallBackChannel:
 				{
-					err = corer.handleCallBack(cbReq)
+					err = corer.handleGRBCCallBack(cbReq)
+				}
+			case cbReq := <-corer.cbcCallBackChannel:
+				{
+					err = corer.handleCBCCallBack(cbReq)
 				}
 			}
 

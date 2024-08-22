@@ -12,7 +12,7 @@ const (
 	UpdateGrade
 )
 
-type callBackReq struct {
+type grbcCallBackReq struct {
 	digest    crypto.Digest
 	nodeID    NodeID
 	reference map[crypto.Digest]NodeID
@@ -45,10 +45,10 @@ type GRBC struct {
 	rflag atomic.Bool
 	once  sync.Once
 
-	callBackChannel chan<- *callBackReq
+	callBackChannel chan<- *grbcCallBackReq
 }
 
-func NewGRBC(corer *Core, proposer NodeID, round int, callBackChannel chan<- *callBackReq) *GRBC {
+func NewGRBC(corer *Core, proposer NodeID, round int, callBackChannel chan<- *grbcCallBackReq) *GRBC {
 	grbc := &GRBC{
 		proposer:        proposer,
 		round:           round,
@@ -123,7 +123,7 @@ func (g *GRBC) processEcho(echo *EchoMsg) {
 			g.rflag.Store(true)
 
 			//TODO: callback
-			g.callBackChannel <- &callBackReq{
+			g.callBackChannel <- &grbcCallBackReq{
 				nodeID:    g.proposer,
 				digest:    echo.BlockHash,
 				round:     g.round,
@@ -160,7 +160,7 @@ func (g *GRBC) processReady(ready *ReadyMsg) {
 			g.rflag.Store(true)
 
 			//TODO: callback
-			g.callBackChannel <- &callBackReq{
+			g.callBackChannel <- &grbcCallBackReq{
 				nodeID:    g.proposer,
 				digest:    ready.BlockHash,
 				round:     g.round,
@@ -173,7 +173,7 @@ func (g *GRBC) processReady(ready *ReadyMsg) {
 		g.grade.Store(GradeTwo)
 
 		//TODO: update grade
-		g.callBackChannel <- &callBackReq{
+		g.callBackChannel <- &grbcCallBackReq{
 			nodeID: g.proposer,
 			digest: ready.BlockHash,
 			round:  ready.Round,
