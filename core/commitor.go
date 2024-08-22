@@ -194,13 +194,6 @@ func (c *Commitor) run() {
 			if leader := c.elector.GetLeader(num); leader != NONE {
 
 				var leaderQ [][2]int
-				for i := 1; i <= c.N; i++ {
-					var node int = (int(leader) + i) % c.N
-					if c.localDAG.GetGrade(2*num, node) == GradeTwo {
-						leaderQ = append(leaderQ, [2]int{node, 2 * num})
-					}
-				}
-
 				for i := num - 1; i > c.curWave; i-- {
 					if node := c.elector.GetLeader(i); node != NONE {
 						leaderQ = append(leaderQ, [2]int{int(node), i * 2})
@@ -216,6 +209,7 @@ func (c *Commitor) run() {
 
 func (c *Commitor) commitLeaderQueue(q [][2]int) {
 
+	preRound := -1
 	for i := len(q) - 1; i >= 0; i-- {
 
 		leader, round := q[i][0], q[i][1]
@@ -234,7 +228,7 @@ func (c *Commitor) commitLeaderQueue(q [][2]int) {
 				n := len(queue1)
 				temp := make([]*crypto.Digest, c.N)
 
-				for n > 0 {
+				for n > 0 && round > preRound {
 					block, node := queue1[0], queue2[0]
 					if _, ok := c.commitBlocks[block]; !ok {
 
@@ -244,34 +238,19 @@ func (c *Commitor) commitLeaderQueue(q [][2]int) {
 						if ref, ok := c.localDAG.GetReceivedBlockReference(round, node); !ok {
 							logger.Error.Println("commitor : not received block reference")
 						} else {
-
 							for d, nodeid := range ref {
 								temp[nodeid] = &d
 							}
-
 						}
 
 					}
 					queue1, queue2 = queue1[1:], queue2[1:]
 					n--
 				} //for
-
-				//next round is pbc round
-				if round%WaveRound == 0 {
-					for j := 0; j < c.N; j++ {
-						if temp[j] != nil {
-							queue1 = append(queue1, *temp[j])
-							queue2 = append(queue2, NodeID(j))
-						}
-					}
-				} else { //next round id grbc round
-					L := int(c.elector.GetLeader((round / 2)))
-					for j := 0; j < c.N; j++ {
-						ind := (L + c.N - j) % c.N
-						if temp[ind] != nil {
-							queue1 = append(queue1, *temp[ind])
-							queue2 = append(queue2, NodeID(ind))
-						}
+				for j := 0; j < c.N; j++ {
+					if temp[j] != nil {
+						queue1 = append(queue1, *temp[j])
+						queue2 = append(queue2, NodeID(j))
 					}
 				}
 				round--
@@ -281,7 +260,7 @@ func (c *Commitor) commitLeaderQueue(q [][2]int) {
 		for i := len(sortC) - 1; i >= 0; i-- {
 			c.inner <- sortC[i] // SeqCommit
 		}
-
+		preRound = q[i][1]
 	} //for
 }
 
