@@ -204,13 +204,13 @@ func (corer *Core) handleGRBCPropose(propose *GRBCProposeMsg) error {
 		return err
 	}
 
-	// //Step 3: check reference
-	// if ok, miss := corer.checkReference(propose.B); !ok {
-	// 	//retrieve miss block
-	// 	corer.retriever.requestBlocks(miss, propose.Author, propose.B.Hash())
+	//Step 3: check reference
+	if ok, miss := corer.checkReference(propose.B); !ok {
+		//retrieve miss block
+		corer.retriever.requestBlocks(miss, propose.Author, propose.B.Hash())
 
-	// 	// return ErrReference(propose.MsgType(), propose.Round, int(propose.Author))
-	// }
+		return ErrReference(propose.MsgType(), propose.Round, int(propose.Author))
+	}
 
 	//Step 4: process
 	instance := corer.getGRBCInstance(propose.Author, propose.Round)
