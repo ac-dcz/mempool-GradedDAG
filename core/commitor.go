@@ -194,6 +194,7 @@ func (c *Commitor) run() {
 			if leader := c.elector.GetLeader(num); leader != NONE {
 
 				var leaderQ [][2]int
+				leaderQ = append(leaderQ, [2]int{int(leader), num * 2})
 				for i := num - 1; i > c.curWave; i-- {
 					if node := c.elector.GetLeader(i); node != NONE {
 						leaderQ = append(leaderQ, [2]int{int(node), i * 2})
@@ -201,58 +202,50 @@ func (c *Commitor) run() {
 				}
 				c.commitLeaderQueue(leaderQ)
 				c.curWave = num
-			}
 
+			}
 		}
 	}
 }
 
 func (c *Commitor) commitLeaderQueue(q [][2]int) {
 
-	preRound := -1
+	nextRound := c.curWave * 2
 	for i := len(q) - 1; i >= 0; i-- {
-
 		leader, round := q[i][0], q[i][1]
+		var sortC []crypto.Digest
 		var (
-			queue1 []crypto.Digest
-			queue2 []NodeID
-			sortC  []crypto.Digest
+			qDigest []crypto.Digest
+			qNode   []NodeID
 		)
-		if d, ok := c.localDAG.GetReceivedBlock(round, NodeID(leader)); !ok {
+		if block, ok := c.localDAG.GetReceivedBlock(round, NodeID(leader)); !ok {
 			logger.Error.Println("commitor : not received block")
 			continue
 		} else {
-			queue1, queue2 = append(queue1, d), append(queue2, NodeID(leader))
-			for len(queue1) > 0 {
-
-				n := len(queue1)
-				temp := make([]*crypto.Digest, c.N)
-
-				for n > 0 && round > preRound {
-					block, node := queue1[0], queue2[0]
+			qDigest = append(qDigest, block)
+			qNode = append(qNode, NodeID(leader))
+			for len(qDigest) > 0 && round >= nextRound {
+				n := len(qDigest)
+				for n > 0 {
+					block := qDigest[0]
+					node := qNode[0]
 					if _, ok := c.commitBlocks[block]; !ok {
-
 						sortC = append(sortC, block)       // seq commit vector
 						c.commitBlocks[block] = struct{}{} // commit flag
 
 						if ref, ok := c.localDAG.GetReceivedBlockReference(round, node); !ok {
 							logger.Error.Println("commitor : not received block reference")
 						} else {
-							for d, nodeid := range ref {
-								temp[nodeid] = &d
+							for digest, node := range ref {
+								qDigest = append(qDigest, digest)
+								qNode = append(qNode, node)
 							}
 						}
-
 					}
-					queue1, queue2 = queue1[1:], queue2[1:]
+					qDigest = qDigest[1:]
+					qNode = qNode[1:]
 					n--
 				} //for
-				for j := 0; j < c.N; j++ {
-					if temp[j] != nil {
-						queue1 = append(queue1, *temp[j])
-						queue2 = append(queue2, NodeID(j))
-					}
-				}
 				round--
 			} //for
 		}
@@ -260,7 +253,7 @@ func (c *Commitor) commitLeaderQueue(q [][2]int) {
 		for i := len(sortC) - 1; i >= 0; i-- {
 			c.inner <- sortC[i] // SeqCommit
 		}
-		preRound = q[i][1]
+		nextRound = q[i][1]
 	} //for
 }
 

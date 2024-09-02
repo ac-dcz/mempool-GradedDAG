@@ -42,9 +42,10 @@ func (b *Block) Hash() crypto.Digest {
 	hasher := crypto.NewHasher()
 	hasher.Add(strconv.AppendInt(nil, int64(b.Author), 2))
 	hasher.Add(strconv.AppendInt(nil, int64(b.Round), 2))
-	for _, tx := range b.Batch.Txs {
-		hasher.Add(tx)
-	}
+	hasher.Add(strconv.AppendInt(nil, int64(b.Batch.ID), 2))
+	// for _, tx := range b.Batch.Txs {
+	// 	hasher.Add(tx)
+	// }
 	// for d, id := range b.Reference {
 	// 	hasher.Add(d[:])
 	// 	hasher.Add(strconv.AppendInt(nil, int64(id), 2))
